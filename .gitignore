@@ -1,0 +1,17 @@
+.venv
+.env
+
+private_key.json
+
+*.geojson*
+*.tif*
+*.shp*
+*.parquet*
+*.dbx*
+*.dbf*
+*.cpg*
+*.prj*
+*.qmd*
+*.fgb*
+*.jp2*
+*.npy*
