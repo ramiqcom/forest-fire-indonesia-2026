@@ -21,8 +21,10 @@ DATES = [
 def run_s1(name: str, roi, sql_where: str = "", dates: tuple[str, str] | None = None):
     logger.info("Run S1")
 
+    adjust_name = name.replace(" ", "_")
+
     cmd = f"""docker container run \
-                --name s1_{name} \
+                --name s1_{adjust_name} \
                 --rm \
                 --cpus {CPU_PER_PROCESS} \
                 -v {OUTPUT_LOCAL}:{OUTPUT_VOLUME} \
@@ -32,7 +34,7 @@ def run_s1(name: str, roi, sql_where: str = "", dates: tuple[str, str] | None = 
                 -e S1_END_DATE="{dates[1]}" \
                 -e S1_BANDS='["vv", "vh"]' \
                 -e S1_RESOLUTION={RESOLUTION} \
-                -e S1_OUTPUT_PREFIX={name} \
+                -e S1_OUTPUT_PREFIX={adjust_name} \
                 eu.gcr.io/ramadhan-s4g/rs-open-source-docker-base:latest \
                 .venv/bin/python -m modules.s1_rtc_composite \
         """
@@ -41,17 +43,20 @@ def run_s1(name: str, roi, sql_where: str = "", dates: tuple[str, str] | None = 
 
     logger.info("Upload S1 data")
     check_call(
-        f"gcloud storage cp {OUTPUT_LOCAL}/{name}*S1*.tif {S1_CLOUD_PREFIX}/",
+        f"gcloud storage cp {OUTPUT_LOCAL}/{adjust_name}*S1*.tif {S1_CLOUD_PREFIX}/",
         shell=True,
     )
 
-    check_call(f"rm {OUTPUT_LOCAL}/{name}*S1*.tif", shell=True)
+    check_call(f"rm {OUTPUT_LOCAL}/{adjust_name}*S1*.tif", shell=True)
 
 
-done_s1 = check_output(
-    f"gcloud storage ls {S1_CLOUD_PREFIX}", shell=True, text=True
-).split("\n")[:-1]
-done_s1 = ["_".join(path.split("/")[-1].split("_")[:3]) for path in done_s1]
+try:
+    done_s1 = check_output(
+        f"gcloud storage ls {S1_CLOUD_PREFIX}", shell=True, text=True
+    ).split("\n")[:-1]
+    done_s1 = ["_".join(path.split("/")[-1].split("_")[:3]) for path in done_s1]
+except Exception:
+    done_s1 = []
 
 with ThreadPoolExecutor(2) as executor:
     jobs = []
@@ -75,7 +80,6 @@ with ThreadPoolExecutor(2) as executor:
                         date_range,
                     )
                 )
-
     for job in jobs:
         try:
             job.result()
