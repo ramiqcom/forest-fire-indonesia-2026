@@ -10,7 +10,9 @@ CLOUD_PREFIX = "gs://gee-ramiqcom-s4g-bucket/forest_fire_indonesian_2026_august"
 S1_CLOUD_PREFIX = f"{CLOUD_PREFIX}/s1"
 RESOLUTION = 10
 
-ADMIN = "gs://gee-ramiqcom-bucket/admin/indonesia_adm_level_1.fgb"
+ADMIN = (
+    "https://storage.googleapis.com/gee-ramiqcom-bucket/admin/indonesia_adm_level_1.fgb"
+)
 REGION_NAMES = ["Kalimantan Barat"]
 DATES = [
     dict(name="before", start="2026-08-08", end="2026-08-08"),
@@ -76,7 +78,7 @@ with ThreadPoolExecutor(2) as executor:
                         run_s1,
                         name,
                         ADMIN,
-                        f"WADMPR == '{region_name}'",
+                        f"WADMPR = '{region_name}'",
                         date_range,
                     )
                 )
