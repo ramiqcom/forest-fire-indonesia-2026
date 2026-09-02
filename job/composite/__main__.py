@@ -13,8 +13,8 @@ RESOLUTION = 10
 ADMIN = "gs://gee-ramiqcom-bucket/admin/indonesia_adm_level_1.fgb"
 REGION_NAMES = ["Kalimantan Barat"]
 DATES = [
-    dict(name="after", start="2026-08-20", end="2026-08-20"),
     dict(name="before", start="2026-08-08", end="2026-08-08"),
+    dict(name="after", start="2026-09-01", end="2026-09-01"),
 ]
 
 
