@@ -16,7 +16,11 @@ basicConfig(
 )
 logger = getLogger(__name__)
 
-ROI_PATHS = [Path("input/palangka_raya.geojson"), Path("input/sebangau.geojson")]
+ROI_PATHS = [
+    Path("input/palangka_raya.geojson"),
+    Path("input/sebangau.geojson"),
+    Path("input/kundangan.geojson"),
+]
 OUTPUT_LOCAL = Path("output")
 CLOUD_PREFIX = "gs://gee-ramiqcom-s4g-bucket/forest_fire_indonesian_2026/s1"
 RESOLUTION = 30
