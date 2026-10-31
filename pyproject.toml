@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.8", "pre-commit>=4", "httpx", "jupyterlab"]
+dev = ["pytest>=8", "ruff>=0.8", "pre-commit>=4", "httpx", "jupyterlab", "contextily", "matplotlib"]
 
 [build-system]
 requires = ["hatchling"]
