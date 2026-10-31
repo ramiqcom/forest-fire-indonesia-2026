@@ -1,3 +1,0 @@
-FROM eu.gcr.io/ramadhan-s4g/eo-base:latest
-
-WORKDIR /usr/src/app
