@@ -26,7 +26,7 @@ PRODUCT = "firms_grid"
 DATE_NAME = "2026-08_2026-10"
 
 CRS = "EPSG:4326"
-# Around 1 km at the equator, the regions are within 10 degrees of it
+# Around 1 km at the equator, cells are narrower away from it (about 0.95 km at 18° S)
 RESOLUTION = 0.009
 # Count the fire points within half a cell from the cell centre
 RADIUS = RESOLUTION / 2
