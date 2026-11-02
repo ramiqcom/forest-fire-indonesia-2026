@@ -48,6 +48,23 @@ services:
     environment:
       GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/gcp_credentials
       CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: /run/secrets/gcp_credentials
+  # Run before firms_grid, which reads its output from the bucket
+  worldcover:
+    build:
+      context: .
+      secrets:
+        - github_token
+    command: [ ".venv/bin/python", "-m", "job.worldcover" ]
+    volumes:
+      - ./input:/usr/src/app/input
+      - ./output:/usr/src/app/output
+    env_file:
+      - .env
+    secrets:
+      - gcp_credentials
+    environment:
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/gcp_credentials
+      CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: /run/secrets/gcp_credentials
 
 # GitHub token with read access to space4good/s4g-lib, used only at build time
 secrets:

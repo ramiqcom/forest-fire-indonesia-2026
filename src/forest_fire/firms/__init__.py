@@ -1,11 +1,18 @@
 from datetime import datetime, timedelta
 from logging import getLogger
-from subprocess import check_call
+from subprocess import call, check_call
 from tempfile import TemporaryDirectory
+from time import sleep
 
 from .config import FIRMS_API_PREFIX, MAP_KEYS
 
 logger = getLogger(__name__)
+
+# A FIRMS CSV starts with the latitude column, anything else is an error message
+CSV_HEADER_START = "latitude"
+DOWNLOAD_ATTEMPTS = 6
+# Waits grow with each attempt, 30 s up to 3 min, the transaction limit resets within 10 min
+RETRY_WAIT_SECONDS = 30
 
 
 def get_firms_alert(
@@ -69,11 +76,39 @@ def _get_data_per_days(
     outputs = []
     for key in MAP_KEYS:
         output = f"{folder.name}/{key}.csv"
-        request_url = (
-            f"{FIRMS_API_PREFIX}/{key}/{bbox_arg}/{difference_in_days}/{start_date}"
-        )
-        logger.info(request_url)
-        check_call(f"curl -o {output} {request_url}", shell=True)
+        request_path = f"{key}/{bbox_arg}/{difference_in_days}/{start_date}"
+        # Logged without the prefix, it holds the MAP_KEY
+        logger.info(request_path)
+        _download_csv(f"{FIRMS_API_PREFIX}/{request_path}", output, request_path)
         outputs.append(output)
 
     return outputs
+
+
+def _download_csv(request_url: str, output: str, request_path: str):
+    """Download one FIRMS CSV, retrying until the response is a CSV.
+
+    FIRMS can answer with a message instead of data, for example when the transaction limit
+    of the MAP_KEY is reached, sometimes with HTTP 200. That message was saved as an empty
+    CSV before, so whole days went missing without an error.
+
+    Raises:
+        RuntimeError: If no CSV is returned after all attempts.
+    """
+    for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+        returncode = call(
+            ["curl", "--fail", "--silent", "--show-error", "--output", output, request_url]
+        )
+        first_line = ""
+        if returncode == 0:
+            with open(output, encoding="utf-8", errors="replace") as file:
+                first_line = file.readline().strip()
+            if first_line.startswith(CSV_HEADER_START):
+                return
+        wait = RETRY_WAIT_SECONDS * attempt
+        logger.warning(
+            f"No CSV for {request_path} (attempt {attempt}, curl exit {returncode}, "
+            f"response {first_line[:80]!r}), retrying in {wait} s"
+        )
+        sleep(wait)
+    raise RuntimeError(f"No FIRMS CSV for {request_path} after {DOWNLOAD_ATTEMPTS} attempts")

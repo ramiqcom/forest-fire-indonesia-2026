@@ -2,13 +2,12 @@ from logging import INFO, basicConfig, getLogger
 from math import ceil, floor
 from pathlib import Path
 from shutil import which
-from subprocess import DEVNULL, CalledProcessError, check_call, check_output
+from subprocess import DEVNULL, CalledProcessError, call, check_call, check_output
 
 import geopandas as gpd
 from dotenv import load_dotenv
-from s4g.composite import generate_worldcover
 
-from forest_fire.aoi import REGIONS, api_roi, read_provinces
+from forest_fire.aoi import REGIONS, read_provinces
 
 load_dotenv()
 
@@ -23,6 +22,7 @@ OUTPUT_LOCAL = Path("output/firms_grid")
 CLOUD_PREFIX = "gs://gee-ramiqcom-s4g-bucket/forest_fire_indonesian_2026"
 INPUT_PRODUCT = "firms"
 PRODUCT = "firms_grid"
+WORLDCOVER_PRODUCT = "worldcover"
 DATE_NAME = "2026-08_2026-10"
 
 CRS = "EPSG:4326"
@@ -109,10 +109,12 @@ def run(region: str):
         ]
     )  # fmt: skip
 
-    logger.info(f"Generate WorldCover {region}")
+    # WorldCover from job/worldcover, generated once per region
+    logger.info(f"Download WorldCover {region}")
     worldcover_path = folder / "worldcover.tif"
-    roi, roi_where = api_roi(region, aoi, folder / "roi_api.fgb")
-    generate_worldcover(str(worldcover_path), roi, roi_sql_where=roi_where, resolution=100)
+    worldcover_url = f"{CLOUD_PREFIX}/{WORLDCOVER_PRODUCT}/{region}.tif"
+    if call([which("gcloud"), "storage", "cp", worldcover_url, str(worldcover_path)]) != 0:
+        raise RuntimeError(f"No WorldCover at {worldcover_url}, run job/worldcover first")
 
     # Same grid as the fire count so both can be combined pixel by pixel
     worldcover_grid_path = folder / "worldcover_grid.tif"
