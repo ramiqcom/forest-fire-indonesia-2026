@@ -2,7 +2,7 @@ from logging import INFO, basicConfig, getLogger
 from math import ceil, floor
 from pathlib import Path
 from shutil import which
-from subprocess import check_call, check_output
+from subprocess import DEVNULL, CalledProcessError, check_call, check_output
 
 import geopandas as gpd
 from dotenv import load_dotenv
@@ -18,16 +18,21 @@ basicConfig(
 logger = getLogger(__name__)
 
 AOI_URL = "https://storage.googleapis.com/gee-ramiqcom-bucket/admin/indonesia_adm_level_1.fgb"
-# Kalimantan provinces only
-AOI_FILTER = "WADMPR LIKE 'Kalimantan%'"
+# Provinces of each region, mainland Sumatera leaves out Kepulauan Riau and Bangka Belitung
+REGIONS = {
+    "kalimantan": "WADMPR LIKE 'Kalimantan%'",
+    "sumatera": (
+        "WADMPR LIKE 'Sumatera%' OR WADMPR IN ('Aceh', 'Riau', 'Jambi', 'Bengkulu', 'Lampung')"
+    ),
+}
 OUTPUT_LOCAL = Path("output/firms_grid")
 CLOUD_PREFIX = "gs://gee-ramiqcom-s4g-bucket/forest_fire_indonesian_2026"
 INPUT_PRODUCT = "firms"
 PRODUCT = "firms_grid"
-NAME = "kalimantan_2026-08_2026-10"
+DATE_NAME = "2026-08_2026-10"
 
 CRS = "EPSG:4326"
-# Around 1 km at the equator, Kalimantan is within 5 degrees of it
+# Around 1 km at the equator, Kalimantan and Sumatera are within 6 degrees of it
 RESOLUTION = 0.009
 # Count the fire points within half a cell from the cell centre
 RADIUS = RESOLUTION / 2
@@ -37,8 +42,20 @@ WORLDCOVER_WATER = 80
 COMPRESS = "--co=COMPRESS=ZSTD"
 
 
-def get_extent() -> list[str]:
-    aoi = gpd.read_file(f"/vsicurl/{AOI_URL}", where=AOI_FILTER, columns=["WADMPR"])
+def list_done() -> set[str]:
+    try:
+        paths = check_output(
+            [which("gcloud"), "storage", "ls", f"{CLOUD_PREFIX}/{PRODUCT}/"],
+            text=True,
+            stderr=DEVNULL,
+        )
+    except CalledProcessError:
+        # Prefix does not exist yet
+        return set()
+    return {Path(path).stem for path in paths.split()}
+
+
+def get_extent(aoi: gpd.GeoDataFrame) -> list[str]:
     xmin, ymin, xmax, ymax = aoi.to_crs(CRS).total_bounds
     # Snap to the resolution so the cells line up
     return [
@@ -49,18 +66,24 @@ def get_extent() -> list[str]:
     ]
 
 
-if __name__ == "__main__":
-    OUTPUT_LOCAL.mkdir(parents=True, exist_ok=True)
+def run(region: str, aoi_filter: str):
+    name = f"{region}_{DATE_NAME}"
+    folder = OUTPUT_LOCAL / region
+    folder.mkdir(parents=True, exist_ok=True)
 
-    logger.info(f"Download {INPUT_PRODUCT} data")
-    firms_paths = check_output(
-        [which("gcloud"), "storage", "ls", f"{CLOUD_PREFIX}/{INPUT_PRODUCT}/*.fgb"], text=True
-    ).split()
-    check_call([which("gcloud"), "storage", "cp", *firms_paths, str(OUTPUT_LOCAL)])
-    local_paths = [str(OUTPUT_LOCAL / Path(path).name) for path in firms_paths]
+    aoi = gpd.read_file(f"/vsicurl/{AOI_URL}", where=aoi_filter, columns=["WADMPR"])
+    extent = ",".join(get_extent(aoi))
 
-    logger.info("Merge fire points")
-    merged_path = OUTPUT_LOCAL / "firms_merged.fgb"
+    # One FIRMS file per province from the firms job
+    provinces = sorted(aoi["WADMPR"].str.lower().str.replace(" ", "_").unique())
+    firms_paths = [f"{CLOUD_PREFIX}/{INPUT_PRODUCT}/{p}_{DATE_NAME}.fgb" for p in provinces]
+
+    logger.info(f"Download {INPUT_PRODUCT} data {region}")
+    check_call([which("gcloud"), "storage", "cp", *firms_paths, str(folder)])
+    local_paths = [str(folder / Path(path).name) for path in firms_paths]
+
+    logger.info(f"Merge fire points {region}")
+    merged_path = folder / "firms_merged.fgb"
     check_call(
         [
             which("gdal"), "vector", "concat",
@@ -73,12 +96,12 @@ if __name__ == "__main__":
         ]
     )  # fmt: skip
 
-    logger.info("Grid fire points")
-    grid_path = OUTPUT_LOCAL / "firms_grid.tif"
+    logger.info(f"Grid fire points {region}")
+    grid_path = folder / "firms_grid.tif"
     check_call(
         [
             which("gdal"), "vector", "grid", "count",
-            f"--extent={','.join(get_extent())}",
+            f"--extent={extent}",
             f"--resolution={RESOLUTION},{RESOLUTION}",
             f"--radius={RADIUS}",
             "--ot=UInt16",
@@ -91,12 +114,12 @@ if __name__ == "__main__":
         ]
     )  # fmt: skip
 
-    logger.info("Generate WorldCover")
-    worldcover_path = OUTPUT_LOCAL / "worldcover.tif"
-    generate_worldcover(str(worldcover_path), AOI_URL, roi_sql_where=AOI_FILTER, resolution=100)
+    logger.info(f"Generate WorldCover {region}")
+    worldcover_path = folder / "worldcover.tif"
+    generate_worldcover(str(worldcover_path), AOI_URL, roi_sql_where=aoi_filter, resolution=100)
 
     # Same grid as the fire count so both can be combined pixel by pixel
-    worldcover_grid_path = OUTPUT_LOCAL / "worldcover_grid.tif"
+    worldcover_grid_path = folder / "worldcover_grid.tif"
     check_call(
         [
             which("gdal"), "raster", "reproject",
@@ -109,18 +132,18 @@ if __name__ == "__main__":
         ]
     )  # fmt: skip
 
-    # Kalimantan as 1 on the same grid, a cell is inside when its centre is inside,
+    # Region as 1 on the same grid, a cell is inside when its centre is inside,
     # so coastal cells that are mostly sea are left out
-    logger.info("Rasterize Kalimantan")
-    roi_grid_path = OUTPUT_LOCAL / "roi_grid.tif"
+    logger.info(f"Rasterize {region}")
+    roi_grid_path = folder / "roi_grid.tif"
     check_call(
         [
             which("gdal"), "vector", "rasterize",
-            f"--where={AOI_FILTER}",
+            f"--where={aoi_filter}",
             "--burn=1",
             "--init=0",
             "--ot=UInt8",
-            f"--extent={','.join(get_extent())}",
+            f"--extent={extent}",
             f"--resolution={RESOLUTION},{RESOLUTION}",
             COMPRESS,
             "--overwrite",
@@ -129,8 +152,8 @@ if __name__ == "__main__":
         ]
     )  # fmt: skip
 
-    logger.info("Mask sea and water")
-    land_path = OUTPUT_LOCAL / "firms_grid_land.tif"
+    logger.info(f"Mask sea and water {region}")
+    land_path = folder / "firms_grid_land.tif"
     check_call(
         [
             which("gdal"), "raster", "calc",
@@ -147,7 +170,7 @@ if __name__ == "__main__":
         ]
     )  # fmt: skip
 
-    output_path = OUTPUT_LOCAL / f"{NAME}.tif"
+    output_path = folder / f"{name}.tif"
     check_call(
         [
             which("gdal"), "raster", "convert",
@@ -163,7 +186,26 @@ if __name__ == "__main__":
         ]
     )  # fmt: skip
 
-    logger.info(f"Upload {PRODUCT} {NAME}")
+    logger.info(f"Upload {PRODUCT} {name}")
     check_call(
-        [which("gcloud"), "storage", "cp", str(output_path), f"{CLOUD_PREFIX}/{PRODUCT}/{NAME}.tif"]
+        [which("gcloud"), "storage", "cp", str(output_path), f"{CLOUD_PREFIX}/{PRODUCT}/{name}.tif"]
     )
+
+
+if __name__ == "__main__":
+    done = list_done()
+
+    failed = []
+    for region, aoi_filter in REGIONS.items():
+        name = f"{region}_{DATE_NAME}"
+        if name in done:
+            logger.info(f"Skip {PRODUCT} {name}, already in {CLOUD_PREFIX}/{PRODUCT}")
+            continue
+        try:
+            run(region, aoi_filter)
+        except Exception as e:
+            logger.error(f"Error {PRODUCT} {name}: {e}")
+            failed.append(name)
+
+    if failed:
+        raise SystemExit(f"Failed: {', '.join(failed)}")

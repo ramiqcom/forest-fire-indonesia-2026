@@ -21,8 +21,11 @@ logger = getLogger(__name__)
 AOI_URL = (
     "/vsicurl/https://storage.googleapis.com/gee-ramiqcom-bucket/admin/indonesia_adm_level_1.fgb"
 )
-# Kalimantan provinces only
-AOI_FILTER = "WADMPR LIKE 'Kalimantan%'"
+# Kalimantan and mainland Sumatera provinces, Kepulauan Riau and Bangka Belitung left out
+AOI_FILTER = (
+    "WADMPR LIKE 'Kalimantan%' OR WADMPR LIKE 'Sumatera%' "
+    "OR WADMPR IN ('Aceh', 'Riau', 'Jambi', 'Bengkulu', 'Lampung')"
+)
 OUTPUT_LOCAL = Path("output")
 CLOUD_PREFIX = "gs://gee-ramiqcom-s4g-bucket/forest_fire_indonesian_2026"
 PRODUCT = "firms"
