@@ -22,6 +22,8 @@ logger = getLogger(__name__)
 OUTPUT_LOCAL = Path("output")
 CLOUD_PREFIX = "gs://gee-ramiqcom-s4g-bucket/forest_fire_indonesian_2026"
 PRODUCT = "firms"
+# Provinces downloaded at the same time, more reach the FIRMS MAP_KEY transaction limit
+MAX_WORKERS = 4
 
 DATES = [
     dict(name="2026-08_2026-10", start="2026-08-01", end="2026-10-31"),
@@ -79,7 +81,7 @@ if __name__ == "__main__":
 
     jobs = {}
     if todo:
-        with ThreadPoolExecutor(len(todo)) as executor:
+        with ThreadPoolExecutor(min(len(todo), MAX_WORKERS)) as executor:
             jobs = {
                 f"{PRODUCT} {province.index[0]}_{date['name']}": executor.submit(
                     run, province, date

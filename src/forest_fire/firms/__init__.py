@@ -11,8 +11,10 @@ logger = getLogger(__name__)
 # A FIRMS CSV starts with the latitude column, anything else is an error message
 CSV_HEADER_START = "latitude"
 DOWNLOAD_ATTEMPTS = 6
-# Waits grow with each attempt, 30 s up to 3 min, the transaction limit resets within 10 min
-RETRY_WAIT_SECONDS = 30
+# Waits double from 1 min up to 10 min, the interval of the MAP_KEY transaction limit (5000 per
+# 10 min), so a limit reached by many downloads at once has time to reset, 37 min in total
+RETRY_WAIT_SECONDS = 60
+MAX_RETRY_WAIT_SECONDS = 600
 
 
 def get_firms_alert(
@@ -105,7 +107,7 @@ def _download_csv(request_url: str, output: str, request_path: str):
                 first_line = file.readline().strip()
             if first_line.startswith(CSV_HEADER_START):
                 return
-        wait = RETRY_WAIT_SECONDS * attempt
+        wait = min(RETRY_WAIT_SECONDS * 2 ** (attempt - 1), MAX_RETRY_WAIT_SECONDS)
         logger.warning(
             f"No CSV for {request_path} (attempt {attempt}, curl exit {returncode}, "
             f"response {first_line[:80]!r}), retrying in {wait} s"
