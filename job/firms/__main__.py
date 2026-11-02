@@ -7,6 +7,7 @@ from subprocess import DEVNULL, CalledProcessError, check_call, check_output
 import geopandas as gpd
 from dotenv import load_dotenv
 
+from forest_fire.aoi import REGIONS, read_provinces
 from forest_fire.firms import get_firms_alert
 
 load_dotenv()
@@ -18,14 +19,6 @@ basicConfig(
 )
 logger = getLogger(__name__)
 
-AOI_URL = (
-    "/vsicurl/https://storage.googleapis.com/gee-ramiqcom-bucket/admin/indonesia_adm_level_1.fgb"
-)
-# Kalimantan and mainland Sumatera provinces, Kepulauan Riau and Bangka Belitung left out
-AOI_FILTER = (
-    "WADMPR LIKE 'Kalimantan%' OR WADMPR LIKE 'Sumatera%' "
-    "OR WADMPR IN ('Aceh', 'Riau', 'Jambi', 'Bengkulu', 'Lampung')"
-)
 OUTPUT_LOCAL = Path("output")
 CLOUD_PREFIX = "gs://gee-ramiqcom-s4g-bucket/forest_fire_indonesian_2026"
 PRODUCT = "firms"
@@ -72,19 +65,17 @@ def run(province: gpd.GeoDataFrame, date: dict):
 if __name__ == "__main__":
     OUTPUT_LOCAL.mkdir(exist_ok=True)
 
-    aoi = gpd.read_file(AOI_URL, where=AOI_FILTER, columns=["KDPPUM", "WADMPR"])
-    aoi = aoi.dissolve(by=["KDPPUM", "WADMPR"]).reset_index()
-    aoi.index = aoi["WADMPR"].str.lower().str.replace(" ", "_").rename("province")
-
     done = list_done()
     todo = []
-    for province in aoi.index:
-        for date in DATES:
-            name = f"{province}_{date['name']}"
-            if name in done:
-                logger.info(f"Skip {PRODUCT} {name}, already in {CLOUD_PREFIX}/{PRODUCT}")
-            else:
-                todo.append((aoi.loc[[province]], date))
+    for region in REGIONS:
+        aoi = read_provinces(region)
+        for province in aoi.index:
+            for date in DATES:
+                name = f"{province}_{date['name']}"
+                if name in done:
+                    logger.info(f"Skip {PRODUCT} {name}, already in {CLOUD_PREFIX}/{PRODUCT}")
+                else:
+                    todo.append((aoi.loc[[province]], date))
 
     jobs = {}
     if todo:

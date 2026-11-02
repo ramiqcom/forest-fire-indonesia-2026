@@ -8,6 +8,8 @@ import geopandas as gpd
 from dotenv import load_dotenv
 from s4g.composite import generate_worldcover
 
+from forest_fire.aoi import REGIONS, read_provinces
+
 load_dotenv()
 
 basicConfig(
@@ -17,14 +19,6 @@ basicConfig(
 )
 logger = getLogger(__name__)
 
-AOI_URL = "https://storage.googleapis.com/gee-ramiqcom-bucket/admin/indonesia_adm_level_1.fgb"
-# Provinces of each region, mainland Sumatera leaves out Kepulauan Riau and Bangka Belitung
-REGIONS = {
-    "kalimantan": "WADMPR LIKE 'Kalimantan%'",
-    "sumatera": (
-        "WADMPR LIKE 'Sumatera%' OR WADMPR IN ('Aceh', 'Riau', 'Jambi', 'Bengkulu', 'Lampung')"
-    ),
-}
 OUTPUT_LOCAL = Path("output/firms_grid")
 CLOUD_PREFIX = "gs://gee-ramiqcom-s4g-bucket/forest_fire_indonesian_2026"
 INPUT_PRODUCT = "firms"
@@ -32,7 +26,7 @@ PRODUCT = "firms_grid"
 DATE_NAME = "2026-08_2026-10"
 
 CRS = "EPSG:4326"
-# Around 1 km at the equator, Kalimantan and Sumatera are within 6 degrees of it
+# Around 1 km at the equator, the regions are within 10 degrees of it
 RESOLUTION = 0.009
 # Count the fire points within half a cell from the cell centre
 RADIUS = RESOLUTION / 2
@@ -66,17 +60,18 @@ def get_extent(aoi: gpd.GeoDataFrame) -> list[str]:
     ]
 
 
-def run(region: str, aoi_filter: str):
+def run(region: str):
     name = f"{region}_{DATE_NAME}"
     folder = OUTPUT_LOCAL / region
     folder.mkdir(parents=True, exist_ok=True)
 
-    aoi = gpd.read_file(f"/vsicurl/{AOI_URL}", where=aoi_filter, columns=["WADMPR"])
+    aoi = read_provinces(region)
     extent = ",".join(get_extent(aoi))
+    roi_path = folder / "roi.fgb"
+    aoi.to_file(roi_path, driver="FlatGeobuf")
 
     # One FIRMS file per province from the firms job
-    provinces = sorted(aoi["WADMPR"].str.lower().str.replace(" ", "_").unique())
-    firms_paths = [f"{CLOUD_PREFIX}/{INPUT_PRODUCT}/{p}_{DATE_NAME}.fgb" for p in provinces]
+    firms_paths = [f"{CLOUD_PREFIX}/{INPUT_PRODUCT}/{p}_{DATE_NAME}.fgb" for p in aoi.index]
 
     logger.info(f"Download {INPUT_PRODUCT} data {region}")
     check_call([which("gcloud"), "storage", "cp", *firms_paths, str(folder)])
@@ -116,7 +111,15 @@ def run(region: str, aoi_filter: str):
 
     logger.info(f"Generate WorldCover {region}")
     worldcover_path = folder / "worldcover.tif"
-    generate_worldcover(str(worldcover_path), AOI_URL, roi_sql_where=aoi_filter, resolution=100)
+    config = REGIONS[region]
+    if config["url"].endswith(".zip"):
+        # The API reads plain links only, a zipped source is sent as the small local ROI file
+        generate_worldcover(str(worldcover_path), str(roi_path), resolution=100)
+    else:
+        # Large ROIs (Sumatera is about 35 MB) are sent as the link with the filter
+        generate_worldcover(
+            str(worldcover_path), config["url"], roi_sql_where=config["where"], resolution=100
+        )
 
     # Same grid as the fire count so both can be combined pixel by pixel
     worldcover_grid_path = folder / "worldcover_grid.tif"
@@ -139,7 +142,6 @@ def run(region: str, aoi_filter: str):
     check_call(
         [
             which("gdal"), "vector", "rasterize",
-            f"--where={aoi_filter}",
             "--burn=1",
             "--init=0",
             "--ot=UInt8",
@@ -147,7 +149,7 @@ def run(region: str, aoi_filter: str):
             f"--resolution={RESOLUTION},{RESOLUTION}",
             COMPRESS,
             "--overwrite",
-            f"/vsicurl/{AOI_URL}",
+            str(roi_path),
             str(roi_grid_path),
         ]
     )  # fmt: skip
@@ -196,13 +198,13 @@ if __name__ == "__main__":
     done = list_done()
 
     failed = []
-    for region, aoi_filter in REGIONS.items():
+    for region in REGIONS:
         name = f"{region}_{DATE_NAME}"
         if name in done:
             logger.info(f"Skip {PRODUCT} {name}, already in {CLOUD_PREFIX}/{PRODUCT}")
             continue
         try:
-            run(region, aoi_filter)
+            run(region)
         except Exception as e:
             logger.error(f"Error {PRODUCT} {name}: {e}")
             failed.append(name)
