@@ -8,7 +8,7 @@ import geopandas as gpd
 from dotenv import load_dotenv
 from s4g.composite import generate_worldcover
 
-from forest_fire.aoi import REGIONS, read_provinces
+from forest_fire.aoi import REGIONS, api_roi, read_provinces
 
 load_dotenv()
 
@@ -111,15 +111,8 @@ def run(region: str):
 
     logger.info(f"Generate WorldCover {region}")
     worldcover_path = folder / "worldcover.tif"
-    config = REGIONS[region]
-    if config["url"].endswith(".zip"):
-        # The API reads plain links only, a zipped source is sent as the small local ROI file
-        generate_worldcover(str(worldcover_path), str(roi_path), resolution=100)
-    else:
-        # Large ROIs (Sumatera is about 35 MB) are sent as the link with the filter
-        generate_worldcover(
-            str(worldcover_path), config["url"], roi_sql_where=config["where"], resolution=100
-        )
+    roi, roi_where = api_roi(region, aoi, folder / "roi_api.fgb")
+    generate_worldcover(str(worldcover_path), roi, roi_sql_where=roi_where, resolution=100)
 
     # Same grid as the fire count so both can be combined pixel by pixel
     worldcover_grid_path = folder / "worldcover_grid.tif"

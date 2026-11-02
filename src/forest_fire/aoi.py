@@ -65,3 +65,18 @@ def read_provinces(region: str) -> gpd.GeoDataFrame:
     )
     provinces.index = (config["prefix"] + names).rename("province")
     return provinces
+
+
+def api_roi(region: str, provinces: gpd.GeoDataFrame, local_path: str) -> tuple[str, str]:
+    """Return the ROI and SQL filter to send ``provinces`` of ``region`` to the rs-open-source API.
+
+    A plain link is sent as it is with a filter on the province names, as the dissolved
+    provinces can be too large to send (Sumatera is about 35 MB). The API can't read a zipped
+    link, so those provinces are written to ``local_path`` and sent as a local file.
+    """
+    config = REGIONS[region]
+    if config["url"].endswith(".zip"):
+        provinces.to_file(local_path, driver="FlatGeobuf")
+        return str(local_path), ""
+    names = ", ".join(f"'{name}'" for name in provinces[config["name_field"]])
+    return config["url"], f"{config['name_field']} IN ({names})"
