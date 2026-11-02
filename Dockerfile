@@ -2,16 +2,20 @@ FROM eu.gcr.io/ramadhan-s4g/eo-base:latest
 
 WORKDIR /usr/src/app
 
-COPY private_key.json .
+RUN python3 -m venv .venv
+ENV PATH=$PATH:/usr/src/app/.venv/bin
 
-RUN gcloud auth activate-service-account --key-file private_key.json
+COPY src src
+COPY README.md LICENSE pyproject.toml ./
 
-COPY job/requirements.txt .
+# s4g-lib is private: the token is mounted only for this step and passed to git via env
+RUN --mount=type=secret,id=github_token,required=true \
+  GIT_CONFIG_COUNT=1 \
+  GIT_CONFIG_KEY_0="url.https://x-access-token:$(cat /run/secrets/github_token)@github.com/.insteadOf" \
+  GIT_CONFIG_VALUE_0="https://github.com/" \
+  .venv/bin/pip install -e . --force-reinstall --no-cache-dir
 
-RUN python3 -m venv .venv && \
-  .venv/bin/pip install -r requirements.txt
-
-COPY __init__.py .
+COPY job job
 
 ENV GS_NO_SIGN_REQUEST=YES
 ENV AWS_NO_SIGN_REQUEST=YES
